@@ -1,77 +1,65 @@
-React (SPA) frontend + Node.js/Express (veya kullandığım backend) için kurumsal seviyede 
-authentication güvenlik mimarisi kurmak istiyorum. Orta ve büyük ölçekli sistemlere uygun, 
-localStorage yerine güvenli cookie tabanlı bir yapı istiyorum. Aşağıdaki tüm katmanları uygula:
+React (SPA) frontend + [BACKEND FRAMEWORK'ÜNÜ BELİRT] backend için authentication güvenlik 
+mimarisi kurmak istiyorum. Kod yazmaya başlamadan ÖNCE bana aşağıdaki soruları sor ve 
+cevaplarıma göre uygun mimariyi seç. Varsayım yapma, sor.
 
-=== 1. TOKEN STRATEJİSİ (Access + Refresh Token) ===
-- Access token: kısa ömürlü (10-15 dk), JWT formatında
-- Refresh token: uzun ömürlü (7 gün), rastgele üretilmiş opak bir string (JWT olmasına gerek yok)
-- Access token'ı response body'de DEĞİL, httpOnly + Secure + SameSite=Strict cookie olarak set et
-- Refresh token'ı ayrı bir httpOnly cookie'de, farklı bir path'te (örn. /api/auth/refresh) tut
-- Frontend hiçbir zaman token'ı localStorage/sessionStorage'da tutmasın, JS ile token'a erişim olmasın
+=== BAŞLAMADAN ÖNCE SORULACAK SORULAR ===
 
-=== 2. REFRESH TOKEN ROTATION ===
-- Her /refresh isteğinde: eski refresh token invalidate edilsin, yenisi üretilip cookie'ye set edilsin
-- Refresh token'lar veritabanında (veya Redis'te) hash'lenerek saklansın, kullanıldıkça "used" işaretlensin
-- Aynı refresh token ikinci kez kullanılmaya çalışılırsa (token theft belirtisi): o kullanıcının TÜM aktif oturumları/refresh token'ları iptal edilsin ve güvenlik logu tutulsun
+1. PROJE BÜYÜKLÜĞÜ:
+   - Küçük ölçek (tek geliştirici, az kullanıcı, MVP/prototip)
+   - Orta ölçek (birkaç geliştirici, aktif kullanıcı kitlesi, büyüyen ürün)
+   - Büyük ölçek (kurumsal, çok sayıda kullanıcı, yüksek güvenlik gereksinimi)
 
-=== 3. CSRF KORUMASI ===
-- httpOnly cookie kullanıldığı için CSRF riskine karşı Double Submit Cookie pattern uygula:
-  - Backend, ayrı bir CSRF token üretip JS'in okuyabileceği (httpOnly olmayan) bir cookie'de versin
-  - Frontend bu CSRF token'ı her state-changing istekte (POST/PUT/DELETE) custom header olarak göndersin (örn. X-CSRF-Token)
-  - Backend header'daki değer ile cookie'deki değeri karşılaştırıp doğrulasın
-- SameSite=Strict (veya cross-domain gerekiyorsa Lax + ek CSRF katmanı) kullan
+2. CACHE / REDİS KULLANIMI:
+   - Redis (veya benzeri bir cache/in-memory store) kullanıyor muyum ya da kurmak ister miyim?
+   - Yoksa sadece mevcut veritabanımı mı kullanmalıyız?
 
-=== 4. SILENT REFRESH MEKANİZMASI (Frontend) ===
-- Axios instance'ı withCredentials: true ile kur (cookie otomatik gitsin)
-- Response interceptor: 401 alındığında otomatik olarak /refresh endpoint'ine istek atsın, başarılıysa orijinal isteği tekrar dene (request queue mantığıyla, aynı anda birden fazla 401 gelirse tek refresh isteği atılsın - race condition önlensin)
-- Refresh de başarısızsa: kullanıcıyı logout yap, /login'e yönlendir
+3. MEVCUT ALTYAPI:
+   - Hangi veritabanını kullanıyorum? (PostgreSQL/MongoDB/MySQL vb.)
+   - Backend framework'üm ne? (Express/NestJS/Django vb.)
+   - Zaten bir authentication yapım var mı, yoksa sıfırdan mı kuracağız?
 
-=== 5. AUTH STATE YÖNETİMİ (Frontend) ===
-- AuthContext (veya Zustand) üzerinden isAuthenticated, user bilgisi yönetilsin
-- Token frontend'de tutulmadığı için, uygulama açılışında /api/auth/me gibi bir endpoint'e istek atarak (cookie otomatik gönderilir) kullanıcının login durumu ve bilgisi çekilsin
-- Bu kontrol tamamlanana kadar loading/splash ekranı gösterilsin
+4. İLERİ SEVİYE İHTİYAÇLAR (büyük ölçekliyse sor):
+   - Social login / OAuth2 (Google, Microsoft vb.) gerekiyor mu?
+   - Multi-device oturum yönetimi ("tüm cihazlardan çıkış yap") gerekiyor mu?
+   - Audit log / anomali tespiti gerekiyor mu?
 
-=== 6. ROUTE GUARD ===
-- ProtectedRoute: isAuthenticated false ise /login'e yönlendirsin
-- PublicRoute (GuestRoute): zaten login olmuş kullanıcı /login veya /register'a giderse /dashboard'a yönlendirsin
-- Route bazlı yetkilendirme de istiyorum: kullanıcı rolüne göre (admin/user) erişim kısıtlaması yapan bir RoleBasedRoute component'i de ekle
+=== CEVAPLARA GÖRE UYGULANACAK MİMARİ ===
 
-=== 7. TOKEN REVOCATION / BLACKLIST ===
-- Redis kullanarak logout olan veya şüpheli görülen access token'ların jti (JWT ID) değerini blacklist'e ekle
-- Her istekte middleware, token'ın blacklist'te olup olmadığını kontrol etsin (kısa TTL ile, access token'ın ömrü kadar tutulması yeterli)
+--- KÜÇÜK ÖLÇEK seçilirse ---
+- Token: localStorage'da JWT (basit access token, orta ömürlü ~1 saat)
+- Frontend: ProtectedRoute + axios interceptor (401 yakalayıp login'e yönlendirme)
+- Redis: kullanılmaz, gerek yok
+- Refresh token: opsiyonel, yoksa süre dolunca direkt tekrar login
 
-=== 8. OAuth2 / OIDC DESTEĞİ (opsiyonel ama ekle) ===
-- Google/Microsoft ile giriş (Social Login) için Authorization Code Flow + PKCE akışını destekleyecek bir yapı kur
-- Passport.js (Node için) veya benzeri bir kütüphane ile OIDC provider entegrasyonu için altyapı hazırla
+--- ORTA ÖLÇEK seçilirse ---
+- Token: httpOnly + Secure + SameSite cookie'de access token (kısa ömürlü) + refresh token (uzun ömürlü)
+- Refresh token rotation uygula
+- CSRF koruması: Double Submit Cookie pattern
+- Silent refresh: axios interceptor'da 401 → otomatik /refresh → orijinal isteği tekrarla (request queue ile race condition önle)
+- Redis CEVABINA göre:
+  - Redis VARSA: refresh token'ları ve blacklist'i Redis'te TTL ile yönet
+  - Redis YOKSA: refresh_tokens ve blacklisted_tokens tablolarını ana veritabanında tut, 
+    expiry alanıyla ve periyodik cron job (node-cron vb.) ile temizle
+- Rate limiting: /login ve /refresh endpoint'lerine uygula (express-rate-limit vb.)
 
-=== 9. GÜVENLİK HEADER'LARI VE CSP ===
-- Backend'de helmet.js (Express için) kullanarak güvenlik header'larını ayarla:
-  - Content-Security-Policy
-  - X-Frame-Options
-  - X-Content-Type-Options
-  - Strict-Transport-Security
-- Frontend'de dangerouslySetInnerHTML kullanımı varsa DOMPurify ile sanitize et
-
-=== 10. RATE LIMITING VE BRUTE-FORCE KORUMASI ===
-- /login ve /refresh endpoint'lerine express-rate-limit (veya benzeri) ile rate limiting uygula
-- Belirli sayıda başarısız login denemesinden sonra IP veya kullanıcı bazlı geçici kilitleme (account lockout) ekle
-
-=== 11. AKTİF OTURUM YÖNETİMİ (Multi-Device) ===
-- Kullanıcının aktif oturumlarını (cihaz/IP/tarayıcı bilgisiyle) veritabanında listeleyebileceği bir yapı kur
-- Kullanıcı "tüm cihazlardan çıkış yap" veya belirli bir oturumu sonlandırabilsin
-
-=== 12. LOGGING VE ANOMALİ TESPİTİ ===
-- Login, logout, refresh, başarısız giriş denemeleri gibi olayları audit log olarak kaydet
-- Aynı token/oturumun farklı IP'lerden aynı anda kullanılması gibi durumları tespit edip flag'leyecek basit bir kontrol mekanizması ekle
+--- BÜYÜK ÖLÇEK seçilirse ---
+- Orta ölçekteki her şeye ek olarak:
+- Token revocation/blacklist mekanizması (Redis şiddetle önerilir, ama cevaba göre karar ver)
+- Rol bazlı yetkilendirme (RoleBasedRoute component'i)
+- Multi-device oturum yönetimi (kullanıcı aktif oturumlarını görüp sonlandırabilsin)
+- OAuth2/OIDC + PKCE desteği (cevaba göre)
+- Audit logging (login/logout/refresh/başarısız denemeler) (cevaba göre)
+- Güvenlik header'ları (helmet.js) + CSP
+- Anomali tespiti: aynı token'ın farklı IP'lerden kullanımını flag'leme (cevaba göre)
 
 === TESLİMAT ===
-Lütfen:
-1. Backend tarafında gerekli middleware, route ve servisleri (authMiddleware.js, tokenService.js, 
-   refreshTokenRepository.js vb.) oluştur
-2. Frontend tarafında AuthContext.jsx, ProtectedRoute.jsx, PublicRoute.jsx, RoleBasedRoute.jsx, 
-   api.js (axios instance + interceptor) dosyalarını oluştur
-3. Kullandığım veritabanını (PostgreSQL/MongoDB/MySQL - belirt) ve Redis'i bu yapıya uygun şekilde entegre et
-4. .env dosyasında olması gereken tüm secret/config değişkenlerini listele
-5. Bu yapının nasıl test edileceğine dair kısa bir açıklama ekle (Postman/curl örnekleri)
+Seçilen ölçeğe göre:
+1. Backend: gerekli middleware, route, servis dosyalarını oluştur
+2. Frontend: AuthContext.jsx, ProtectedRoute.jsx, PublicRoute.jsx, api.js (axios instance + 
+   interceptor) dosyalarını oluştur; büyük ölçekse RoleBasedRoute.jsx da ekle
+3. Redis kullanılacaksa bağlantı/config dosyasını, kullanılmayacaksa veritabanı tablo 
+   şemasını (migration) oluştur
+4. .env dosyasında olması gereken secret/config değişkenlerini listele
+5. Postman/curl ile nasıl test edileceğine dair kısa örnekler ekle
 
-Mevcut proje yapımı (klasörler, kullandığım kütüphaneler, veritabanı) paylaşacağım, buna göre entegre et.
+Mevcut proje klasör yapımı paylaşacağım, ona göre entegre et.
